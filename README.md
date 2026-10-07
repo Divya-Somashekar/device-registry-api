@@ -49,6 +49,12 @@ With the application running:
 
 The specification is generated from the controller, so it cannot drift from the implementation.
 
+![Swagger UI listing the seven device operations, served from the generated OpenAPI 3.1 document](docs/images/swagger.png)
+
+The health endpoint reports the two probes the container healthcheck depends on:
+
+![Actuator health endpoint returning status UP with the liveness and readiness probe groups](docs/images/actuator.png)
+
 ## Endpoints
 
 | Method | Path | Purpose | Success | Errors |
@@ -116,7 +122,7 @@ One stateless process in front of one database. The controller does HTTP, the se
 transaction, and the entity owns the rules — so the interesting decisions all sit in the
 `device` package and `common` only holds what cuts across it.
 
-![img.png](docs/images/architecture-diag.png)
+![Block diagram: client, the Spring Boot process with its device and common packages, and PostgreSQL](docs/images/architecture-diag.png)
 
 Two things the picture is making a point of. The domain rules sit on the entity rather than in
 `DeviceService`, so no caller can route around them. And the database is the only shared state —
@@ -132,8 +138,9 @@ belong to the same request need the version column to stay consistent.
    `409`.
 3. **A device in use cannot be deleted.** Attempting it returns `409`.
 
-The rules live on the `Device` entity rather than in the service layer, so no caller can
-reach an invalid state. Each is a check against the state the device was read with, so they
+Rules 1 and 2 live on the `Device` entity rather than in the service layer, so no caller can
+reach an invalid state. Rule 3 guards a delete, which is not a transition on the entity, so it
+sits in `DeviceService`. Each is a check against the state the device was read with, so they
 need optimistic locking to hold when two requests overlap — see below.
 
 ### Request flow
@@ -141,7 +148,7 @@ need optimistic locking to hold when two requests overlap — see below.
 How an update is served, and where each rule is enforced. `PUT` is the same shape; it
 differs only in requiring every property.
 
-![img.png](docs/images/PATCH-sequence-diag.png)
+![Sequence diagram: a PATCH request through controller, service and entity, with the 400, 404 and both 409 paths](docs/images/PATCH-sequence-diag.png)
 
 ## Errors
 
@@ -235,28 +242,7 @@ client re-reads. `DeviceConcurrencyTest` interleaves two transactions at exactly
 
 The interleaving, with a delete racing a state change:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant A as Request A: DELETE
-    participant DB as PostgreSQL
-    participant B as Request B: PATCH state
-
-    A->>DB: SELECT device
-    DB-->>A: AVAILABLE, version 0
-    Note over A: rule passes: not in use,<br/>so it may be deleted
-
-    B->>DB: SELECT device
-    DB-->>B: AVAILABLE, version 0
-    B->>DB: UPDATE SET state = 'IN_USE', version = 1<br/>WHERE id = ? AND version = 0
-    DB-->>B: 1 row, committed
-    Note over B: 200
-
-    A->>DB: DELETE WHERE id = ? AND version = 0
-    DB-->>A: 0 rows
-    Note over A: the version no longer matches, so the<br/>delete built on the stale read fails
-    Note over A: 409 concurrent-modification
-```
+![Sequence diagram: a DELETE and a PATCH racing, where the stale delete matches no rows and returns 409](docs/images/locking-sequence-diag.png)
 
 Without the version predicate, step 7 would match on `id` alone and delete a device that was
 by then in use, because the check that cleared it ran against a state that no longer held.

@@ -1,13 +1,13 @@
 ' Sequence diagrams for the device registry API.
 '
-' PlantUML source. IntelliJ renders these with the PlantUML plugin; to export from the
-' command line:
-'   docker run --rm -v "$PWD:/work" -w /work plantuml/plantuml -tpng docs/sequence-diagrams.uml
+' PlantUML source. IntelliJ renders these with the PlantUML plugin. README.md embeds the
+' exported PNGs, so re-export after any change:
+'   docker run --rm -v "$PWD:/work" -w /work plantuml/plantuml -tpng -o images docs/*.puml
 '
-' The same two diagrams are embedded in README.md as Mermaid, which is what GitHub renders.
-' Change both, or drop one.
+' Each diagram id below is its export filename, so they must keep matching the paths the
+' README references.
 
-@startuml update-flow
+@startuml PATCH-sequence-diag
 title Update flow: PATCH /api/v1/devices/{id}
 autonumber
 
@@ -56,7 +56,7 @@ end note
 @enduml
 
 
-@startuml optimistic-locking
+@startuml locking-sequence-diag
 title Optimistic locking: a delete racing a state change
 
 autonumber

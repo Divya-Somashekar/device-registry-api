@@ -46,6 +46,22 @@ class OpenApiDocumentationTest {
                         .exists());
     }
 
+    /**
+     * The validation responses are easy to leave off an operation, because the constraint
+     * lives on the request record rather than the controller method. Every operation that
+     * binds a body or a typed parameter can answer 400, so each one must say so.
+     */
+    @Test
+    void documentsTheValidationResponses() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/v1/devices'].post.responses.400").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/devices'].get.responses.400").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/devices/{id}'].put.responses.400").exists())
+                .andExpect(
+                        jsonPath("$.paths['/api/v1/devices/{id}'].patch.responses.400").exists());
+    }
+
     @Test
     void servesSwaggerUi() throws Exception {
         mockMvc.perform(get("/swagger-ui/index.html")).andExpect(status().isOk());

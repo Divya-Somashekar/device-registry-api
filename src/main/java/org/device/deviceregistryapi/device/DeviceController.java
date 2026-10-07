@@ -114,6 +114,10 @@ public class DeviceController {
     @Operation(summary = "Partially update a device",
             description = "Omitted properties keep their current value.")
     @ApiResponse(responseCode = "200", description = "The updated device")
+    @ApiResponse(responseCode = "400",
+            description = "Validation failed: a supplied name or brand is blank or too long",
+            content = @Content(mediaType = "application/problem+json",
+                    schema = @Schema(implementation = ProblemDetail.class)))
     @ApiResponse(responseCode = "404", description = "No device with that id",
             content = @Content(mediaType = "application/problem+json",
                     schema = @Schema(implementation = ProblemDetail.class)))
