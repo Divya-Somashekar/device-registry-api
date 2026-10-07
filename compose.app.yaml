@@ -1,0 +1,39 @@
+# Full stack: API + database. Requires a Dockerfile at the project root.
+#   docker compose -f compose.app.yaml up --build
+services:
+  postgres:
+    image: 'postgres:18'
+    environment:
+      - 'POSTGRES_DB=devices'
+      - 'POSTGRES_USER=devices'
+      - 'POSTGRES_PASSWORD=secret'
+    volumes:
+      - 'postgres-data:/var/lib/postgresql'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U devices -d devices']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - '8080:8080'
+    environment:
+      - 'SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/devices'
+      - 'SPRING_DATASOURCE_USERNAME=devices'
+      - 'SPRING_DATASOURCE_PASSWORD=secret'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL',
+             'curl -sf http://localhost:8080/actuator/health/readiness | grep -q UP']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+volumes:
+  postgres-data:
