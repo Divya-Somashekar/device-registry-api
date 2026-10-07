@@ -224,6 +224,13 @@ class DeviceControllerTest {
     }
 
     @Test
+    void deleteRejectsMalformedId() throws Exception {
+        mockMvc.perform(delete("/api/v1/devices/{id}", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid parameter"));
+    }
+
+    @Test
     void deleteReturns409WhenDeviceIsInUse() throws Exception {
         doThrow(new DeviceInUseException("Cannot delete device while it is in use"))
                 .when(service).delete(ID);

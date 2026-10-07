@@ -49,7 +49,8 @@ class OpenApiDocumentationTest {
     /**
      * The validation responses are easy to leave off an operation, because the constraint
      * lives on the request record rather than the controller method. Every operation that
-     * binds a body or a typed parameter can answer 400, so each one must say so.
+     * binds a body or a typed parameter can answer 400, so each one must say so -- including
+     * fetch-one and delete, which bind no body but still parse a UUID out of the path.
      */
     @Test
     void documentsTheValidationResponses() throws Exception {
@@ -57,9 +58,12 @@ class OpenApiDocumentationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.paths['/api/v1/devices'].post.responses.400").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/devices'].get.responses.400").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/devices/{id}'].get.responses.400").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/devices/{id}'].put.responses.400").exists())
                 .andExpect(
-                        jsonPath("$.paths['/api/v1/devices/{id}'].patch.responses.400").exists());
+                        jsonPath("$.paths['/api/v1/devices/{id}'].patch.responses.400").exists())
+                .andExpect(
+                        jsonPath("$.paths['/api/v1/devices/{id}'].delete.responses.400").exists());
     }
 
     @Test

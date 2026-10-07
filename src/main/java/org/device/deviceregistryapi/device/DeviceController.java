@@ -82,6 +82,9 @@ public class DeviceController {
     @GetMapping("/{id}")
     @Operation(summary = "Fetch a single device")
     @ApiResponse(responseCode = "200", description = "The device")
+    @ApiResponse(responseCode = "400", description = "The id is not a valid UUID",
+            content = @Content(mediaType = "application/problem+json",
+                    schema = @Schema(implementation = ProblemDetail.class)))
     @ApiResponse(responseCode = "404", description = "No device with that id",
             content = @Content(mediaType = "application/problem+json",
                     schema = @Schema(implementation = ProblemDetail.class)))
@@ -134,6 +137,9 @@ public class DeviceController {
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete a device")
     @ApiResponse(responseCode = "204", description = "Device deleted")
+    @ApiResponse(responseCode = "400", description = "The id is not a valid UUID",
+            content = @Content(mediaType = "application/problem+json",
+                    schema = @Schema(implementation = ProblemDetail.class)))
     @ApiResponse(responseCode = "404", description = "No device with that id",
             content = @Content(mediaType = "application/problem+json",
                     schema = @Schema(implementation = ProblemDetail.class)))
