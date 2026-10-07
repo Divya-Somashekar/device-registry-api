@@ -1,0 +1,74 @@
+' Block diagram for the device registry API.
+'
+' PlantUML source. IntelliJ renders this with the PlantUML plugin; to export from the
+' command line:
+'   docker run --rm -v "$PWD:/work" -w /work plantuml/plantuml -tpng docs/block-diagram.puml
+'
+' The same diagram is embedded in README.md as Mermaid, which is what GitHub renders.
+' Change both, or drop one.
+
+@startuml block-diagram
+title Device registry API: one process, one database
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+top to bottom direction
+
+actor "Client" as client
+
+package "device-registry-api — Spring Boot, :8080" as app {
+
+    package "device" as device {
+        [DeviceController\n/api/v1/devices\nHTTP and nothing else] as controller
+        [dto\nrequest and response models] as dto
+        [DeviceService\n@Transactional\norchestration] as service
+        [Device (entity)\nowns the three domain rules\n@Version] as entity
+        [DeviceRepository\nSpring Data JPA] as repository
+    }
+
+    package "common — cross-cutting" as common {
+        [GlobalExceptionHandler\n@RestControllerAdvice] as advice
+        [PageResponse\npaged collection envelope] as page
+        [OpenApiConfig + springdoc\n/v3/api-docs, /swagger-ui.html] as openapi
+        [Actuator\n/actuator/health] as actuator
+    }
+
+    [Hibernate] as hibernate
+    [Flyway\nclasspath:db/migration] as flyway
+}
+
+database "PostgreSQL 18" as db {
+    [device\nid, name, brand, state,\ncreation_time, version] as table
+    [indexes\nupper(brand)+state · state\n(creation_time DESC, id DESC)] as indexes
+}
+
+client --> controller : HTTP, application/json
+client --> openapi : reads the spec,\ngenerated from the controller
+client --> actuator : liveness / readiness
+
+controller ..> dto : binds, validates,\nmaps entity to response
+controller ..> page : wraps a page
+controller --> service : id + request record
+controller ..> advice : exceptions leave here
+
+service --> entity : rename(), changeState()
+service --> repository : find, save, delete
+repository --> hibernate
+hibernate --> db : JDBC\nthe version is in the WHERE clause\nof every update and delete
+flyway --> db : migrates at startup
+
+note right of entity
+    The rules live here, not in the service,
+    so no caller can reach an invalid state.
+end note
+
+note right of advice
+    One error contract: every domain and
+    locking failure becomes problem+json.
+end note
+
+note bottom of app
+    A single stateless process. The database is the only shared state,
+    which is what the optimistic locking in the sequence diagram protects.
+end note
+@enduml

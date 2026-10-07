@@ -110,6 +110,19 @@ A device looks like this:
 
 `state` is one of `AVAILABLE`, `IN_USE`, `INACTIVE`.
 
+## Architecture
+
+One stateless process in front of one database. The controller does HTTP, the service owns the
+transaction, and the entity owns the rules — so the interesting decisions all sit in the
+`device` package and `common` only holds what cuts across it.
+
+![img.png](docs/images/architecture-diag.png)
+
+Two things the picture is making a point of. The domain rules sit on the entity rather than in
+`DeviceService`, so no caller can route around them. And the database is the only shared state —
+nothing is cached and nothing is held between requests — which is why a read and a write that
+belong to the same request need the version column to stay consistent.
+
 ## Domain rules
 
 1. **The creation time cannot be updated.** It is stamped when the device is created. No
@@ -122,6 +135,13 @@ A device looks like this:
 The rules live on the `Device` entity rather than in the service layer, so no caller can
 reach an invalid state. Each is a check against the state the device was read with, so they
 need optimistic locking to hold when two requests overlap — see below.
+
+### Request flow
+
+How an update is served, and where each rule is enforced. `PUT` is the same shape; it
+differs only in requiring every property.
+
+![img.png](docs/images/PATCH-sequence-diag.png)
 
 ## Errors
 
@@ -212,6 +232,34 @@ cleared it ran against a state that no longer held. A `@Version` column makes Hi
 the version in the `WHERE` clause of every update and delete, so a write built on a stale read
 affects no rows and fails instead. The service does not retry; the request gets `409` and the
 client re-reads. `DeviceConcurrencyTest` interleaves two transactions at exactly that point.
+
+The interleaving, with a delete racing a state change:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Request A: DELETE
+    participant DB as PostgreSQL
+    participant B as Request B: PATCH state
+
+    A->>DB: SELECT device
+    DB-->>A: AVAILABLE, version 0
+    Note over A: rule passes: not in use,<br/>so it may be deleted
+
+    B->>DB: SELECT device
+    DB-->>B: AVAILABLE, version 0
+    B->>DB: UPDATE SET state = 'IN_USE', version = 1<br/>WHERE id = ? AND version = 0
+    DB-->>B: 1 row, committed
+    Note over B: 200
+
+    A->>DB: DELETE WHERE id = ? AND version = 0
+    DB-->>A: 0 rows
+    Note over A: the version no longer matches, so the<br/>delete built on the stale read fails
+    Note over A: 409 concurrent-modification
+```
+
+Without the version predicate, step 7 would match on `id` alone and delete a device that was
+by then in use, because the check that cleared it ran against a state that no longer held.
 
 The version is not exposed in the API. It protects a read and a write that belong to the *same*
 request, which is where the domain rules are enforced. Guarding against a *client* overwriting

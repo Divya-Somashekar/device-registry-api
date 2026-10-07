@@ -1,0 +1,89 @@
+' Sequence diagrams for the device registry API.
+'
+' PlantUML source. IntelliJ renders these with the PlantUML plugin; to export from the
+' command line:
+'   docker run --rm -v "$PWD:/work" -w /work plantuml/plantuml -tpng docs/sequence-diagrams.uml
+'
+' The same two diagrams are embedded in README.md as Mermaid, which is what GitHub renders.
+' Change both, or drop one.
+
+@startuml update-flow
+title Update flow: PATCH /api/v1/devices/{id}
+autonumber
+
+participant "Client" as C
+participant "DeviceController" as Ctl
+participant "DeviceService" as Svc
+participant "Device (entity)" as D
+database "PostgreSQL" as DB
+
+C -> Ctl: PATCH /api/v1/devices/{id}
+note over Ctl: @Valid rejects a blank\nname or brand (400)
+Ctl -> Svc: patch(id, request)
+
+group one transaction
+    Svc -> DB: SELECT ... WHERE id = ?
+    DB --> Svc: row, version 3
+    note over Svc: an unknown id ends here with 404
+    Svc -> D: rename(name, brand)
+
+    alt in use, and name or brand would change
+        D --> Svc: DeviceInUseException
+        Svc --> Ctl: propagates
+        Ctl --> C: 409 device-in-use
+    else allowed
+        D --> Svc: applied
+        Svc -> D: changeState(state)
+        Svc -> DB: UPDATE ... WHERE id = ? AND version = 3
+
+        alt another request committed first
+            DB --> Svc: 0 rows, OptimisticLockingFailureException
+            Svc --> Ctl: propagates
+            Ctl --> C: 409 concurrent-modification
+        else written
+            DB --> Svc: 1 row, version 4
+            Svc --> Ctl: Device
+            Ctl --> C: 200 DeviceResponse
+        end
+    end
+end
+
+note across
+    PUT is the same shape. It differs only in requiring every
+    property, so the rename always runs with supplied values.
+end note
+
+@enduml
+
+
+@startuml optimistic-locking
+title Optimistic locking: a delete racing a state change
+
+autonumber
+
+participant "Request A: DELETE" as A
+database "PostgreSQL" as DB
+participant "Request B: PATCH state" as B
+
+A -> DB: SELECT device
+DB --> A: AVAILABLE, version 0
+note over A: rule passes: not in use,\nso it may be deleted
+
+B -> DB: SELECT device
+DB --> B: AVAILABLE, version 0
+B -> DB: UPDATE SET state = 'IN_USE', version = 1\nWHERE id = ? AND version = 0
+DB --> B: 1 row, committed
+note over B: 200
+
+A -> DB: DELETE WHERE id = ? AND version = 0
+DB --> A: 0 rows
+note over A: the version no longer matches, so the\ndelete built on the stale read fails
+note over A: 409 concurrent-modification
+
+note across
+    Without the version predicate, step 7 would match on id alone and
+    delete a device that was by then in use, because the check that
+    cleared it ran against a state that no longer held.
+end note
+
+@enduml

@@ -1,0 +1,262 @@
+===============================================================================
+ Device Registry API - curl commands
+===============================================================================
+
+ Start the API first:
+
+     docker compose -f compose.app.yaml up --build
+
+ Base URL: http://localhost:8080
+ Commands below are copy-paste ready. Where a command needs a device id,
+ replace <DEVICE_ID> with a real UUID (the Location header of a create, or any
+ id from the list endpoint).
+
+ To grab an id into a shell variable:
+
+     ID=$(curl -s -X POST http://localhost:8080/api/v1/devices \
+       -H 'Content-Type: application/json' \
+       -d '{"name":"Pixel 9","brand":"Google"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+
+
+===============================================================================
+ 1. CREATE
+===============================================================================
+
+# Create a device. State is optional and defaults to AVAILABLE.        -> 201
+curl -i -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Pixel 9","brand":"Google"}'
+
+# Create a device with an explicit state.                              -> 201
+curl -i -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"iPhone 17","brand":"Apple","state":"IN_USE"}'
+
+# Valid states: AVAILABLE, IN_USE, INACTIVE
+curl -i -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Galaxy S25","brand":"Samsung","state":"INACTIVE"}'
+
+# The 201 carries a Location header pointing at the new device:
+#   Location: /api/v1/devices/4f1917f8-e01c-4e85-bc79-451404fb9b1b
+
+
+===============================================================================
+ 2. FETCH
+===============================================================================
+
+# Fetch a single device.                                               -> 200
+curl http://localhost:8080/api/v1/devices/<DEVICE_ID>
+
+# Fetch all devices. Paged: 20 per page, newest first.                 -> 200
+curl http://localhost:8080/api/v1/devices
+
+# Fetch devices by brand. Matching is case-insensitive.                -> 200
+curl 'http://localhost:8080/api/v1/devices?brand=Google'
+curl 'http://localhost:8080/api/v1/devices?brand=google'
+
+# Fetch devices by state.                                              -> 200
+curl 'http://localhost:8080/api/v1/devices?state=AVAILABLE'
+curl 'http://localhost:8080/api/v1/devices?state=IN_USE'
+curl 'http://localhost:8080/api/v1/devices?state=INACTIVE'
+
+# Both filters together.                                               -> 200
+curl 'http://localhost:8080/api/v1/devices?brand=Apple&state=IN_USE'
+
+# A blank brand means unfiltered.                                      -> 200
+curl 'http://localhost:8080/api/v1/devices?brand='
+
+# Pagination. size is capped at 100.                                   -> 200
+curl 'http://localhost:8080/api/v1/devices?page=0&size=5'
+curl 'http://localhost:8080/api/v1/devices?page=1&size=5'
+
+# Sorting. Any device property, asc or desc.                           -> 200
+curl 'http://localhost:8080/api/v1/devices?sort=name,asc'
+curl 'http://localhost:8080/api/v1/devices?sort=creationTime,desc'
+curl 'http://localhost:8080/api/v1/devices?sort=brand,asc&size=5'
+
+# Pretty-print any response:
+curl -s http://localhost:8080/api/v1/devices | python3 -m json.tool
+
+
+===============================================================================
+ 3. UPDATE
+===============================================================================
+
+# Full update (PUT). Every mutable property is required.               -> 200
+curl -X PUT http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Pixel 10","brand":"Google","state":"AVAILABLE"}'
+
+# Partial update (PATCH). Omitted properties keep their value.         -> 200
+curl -X PATCH http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"state":"INACTIVE"}'
+
+# PATCH only the name.                                                 -> 200
+curl -X PATCH http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Renamed Device"}'
+
+# PATCH only the brand.                                                -> 200
+curl -X PATCH http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"brand":"NewBrand"}'
+
+# A creationTime sent by a client is ignored, not rejected.            -> 200
+curl -X PATCH http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"creationTime":"1999-01-01T00:00:00Z"}'
+
+
+===============================================================================
+ 4. DELETE
+===============================================================================
+
+# Delete a device that is not in use.                                  -> 204
+curl -i -X DELETE http://localhost:8080/api/v1/devices/<DEVICE_ID>
+
+# Fetching it afterwards.                                              -> 404
+curl -i http://localhost:8080/api/v1/devices/<DEVICE_ID>
+
+
+===============================================================================
+ 5. DOMAIN RULES - these are expected to fail
+===============================================================================
+
+# Set up a device that is in use:
+#   ID=$(curl -s -X POST http://localhost:8080/api/v1/devices \
+#     -H 'Content-Type: application/json' \
+#     -d '{"name":"Locked","brand":"Acme","state":"IN_USE"}' \
+#     | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+
+# RULE: the name cannot change while the device is in use.             -> 409
+curl -i -X PATCH http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Renamed While In Use"}'
+
+# RULE: the brand cannot change while the device is in use.            -> 409
+curl -i -X PATCH http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"brand":"Different Brand"}'
+
+# RULE: a device in use cannot be deleted.                             -> 409
+curl -i -X DELETE http://localhost:8080/api/v1/devices/<DEVICE_ID>
+
+# RULE: the creation time cannot be updated. See section 3 - the value
+#       is silently ignored rather than rejected.
+
+# A full update MAY release a device that is in use, as long as the
+# name and brand are resent unchanged. Only the state moves.           -> 200
+curl -X PUT http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Locked","brand":"Acme","state":"AVAILABLE"}'
+
+
+===============================================================================
+ 6. VALIDATION AND ERRORS
+===============================================================================
+
+# Blank name. Returns a per-field breakdown.                           -> 400
+curl -i -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"   ","brand":"Acme"}'
+
+# Missing brand.                                                       -> 400
+curl -i -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"No Brand"}'
+
+# PUT requires every property.                                         -> 400
+curl -i -X PUT http://localhost:8080/api/v1/devices/<DEVICE_ID> \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Only A Name"}'
+
+# Unknown state in the body.                                           -> 400
+curl -i -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"X","brand":"Y","state":"FLYING"}'
+
+# Unknown state in the filter.                                         -> 400
+curl -i 'http://localhost:8080/api/v1/devices?state=BOGUS'
+
+# Unknown sort property.                                               -> 400
+curl -i 'http://localhost:8080/api/v1/devices?sort=nope'
+
+# Malformed UUID.                                                      -> 400
+curl -i http://localhost:8080/api/v1/devices/not-a-uuid
+
+# Malformed JSON.                                                      -> 400
+curl -i -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{'
+
+# Unknown device.                                                      -> 404
+curl -i http://localhost:8080/api/v1/devices/00000000-0000-0000-0000-000000000000
+
+# Errors are RFC 7807 problem documents:
+#   {
+#     "type":   "https://api.device-registry/problems/device-in-use",
+#     "title":  "Device is in use",
+#     "status": 409,
+#     "detail": "Cannot change the name or brand of device ... while it is in use",
+#     "instance": "/api/v1/devices/..."
+#   }
+
+
+===============================================================================
+ 7. HEALTH AND DOCUMENTATION
+===============================================================================
+
+# Health.                                                              -> 200
+curl http://localhost:8080/actuator/health
+
+# Liveness and readiness probes.                                       -> 200
+curl http://localhost:8080/actuator/health/liveness
+curl http://localhost:8080/actuator/health/readiness
+
+# OpenAPI document.                                                    -> 200
+curl http://localhost:8080/v3/api-docs
+curl -s http://localhost:8080/v3/api-docs | python3 -m json.tool
+
+# Swagger UI - open in a browser:
+#   http://localhost:8080/swagger-ui.html
+
+
+===============================================================================
+ 8. END-TO-END WALKTHROUGH
+===============================================================================
+
+# Copy-paste this block to exercise every rule in one go.
+
+# 1. Create a device, keep its id
+ID=$(curl -s -X POST http://localhost:8080/api/v1/devices \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Pixel 9","brand":"Google"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+echo "created $ID"
+
+# 2. Fetch it
+curl -s http://localhost:8080/api/v1/devices/$ID | python3 -m json.tool
+
+# 3. Put it in use
+curl -s -X PATCH http://localhost:8080/api/v1/devices/$ID \
+  -H 'Content-Type: application/json' -d '{"state":"IN_USE"}' | python3 -m json.tool
+
+# 4. Renaming it now fails with 409
+curl -i -s -X PATCH http://localhost:8080/api/v1/devices/$ID \
+  -H 'Content-Type: application/json' -d '{"name":"Nope"}' | head -1
+
+# 5. Deleting it now fails with 409
+curl -i -s -X DELETE http://localhost:8080/api/v1/devices/$ID | head -1
+
+# 6. Release it, resending name and brand unchanged
+curl -s -X PUT http://localhost:8080/api/v1/devices/$ID \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Pixel 9","brand":"Google","state":"AVAILABLE"}' | python3 -m json.tool
+
+# 7. Now it deletes
+curl -i -s -X DELETE http://localhost:8080/api/v1/devices/$ID | head -1
+
+# 8. And it is gone
+curl -i -s http://localhost:8080/api/v1/devices/$ID | head -1

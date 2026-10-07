@@ -1,0 +1,401 @@
+# Device Registry API - runnable request collection.
+#
+# IntelliJ IDEA: click the green arrow beside a request, or "Run all requests in file"
+# from the gutter at the top. Requests are ordered so the file runs top to bottom:
+# the create requests stash their ids with client.global.set, and later requests
+# reference them, so nothing needs a UUID pasted in by hand.
+#
+# Start the API first:  docker compose -f compose.app.yaml up --build
+
+@host = http://localhost:8080
+@api = {{host}}/api/v1/devices
+
+###############################################################################
+# Health and documentation
+###############################################################################
+
+### Health probe
+GET {{host}}/actuator/health
+
+> {%
+    client.test("service is up", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.status === "UP", "expected status UP");
+    });
+%}
+
+### OpenAPI document
+GET {{host}}/v3/api-docs
+
+> {%
+    client.test("spec is published", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.info.title === "Device Registry API", "unexpected title");
+    });
+%}
+
+### Swagger UI
+GET {{host}}/swagger-ui.html
+
+###############################################################################
+# Create
+###############################################################################
+
+### Create a device, state omitted so it defaults to AVAILABLE
+POST {{api}}
+Content-Type: application/json
+
+{
+  "name": "Pixel 9",
+  "brand": "Google"
+}
+
+> {%
+    client.global.set("availableId", response.body.id);
+    client.test("created with a Location header", function () {
+        client.assert(response.status === 201, "expected 201");
+        client.assert(response.headers.valueOf("Location") !== null, "no Location header");
+        client.assert(response.body.state === "AVAILABLE", "expected AVAILABLE by default");
+        client.assert(response.body.creationTime !== null, "creationTime was not stamped");
+    });
+%}
+
+### Create a device that is in use
+POST {{api}}
+Content-Type: application/json
+
+{
+  "name": "iPhone 17",
+  "brand": "Apple",
+  "state": "IN_USE"
+}
+
+> {%
+    client.global.set("inUseId", response.body.id);
+    client.test("created in use", function () {
+        client.assert(response.status === 201, "expected 201");
+        client.assert(response.body.state === "IN_USE", "expected IN_USE");
+    });
+%}
+
+### Create a third device for the filters
+POST {{api}}
+Content-Type: application/json
+
+{
+  "name": "Galaxy S25",
+  "brand": "Samsung",
+  "state": "INACTIVE"
+}
+
+> {%
+    client.test("created", function () {
+        client.assert(response.status === 201, "expected 201");
+    });
+%}
+
+###############################################################################
+# Fetch
+###############################################################################
+
+### Fetch a single device
+GET {{api}}/{{availableId}}
+
+> {%
+    client.test("returns the device", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.name === "Pixel 9", "unexpected name");
+    });
+%}
+
+### Fetch all devices
+GET {{api}}
+
+> {%
+    client.test("returns a page envelope", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.content.length >= 3, "expected at least 3 devices");
+        client.assert(response.body.page === 0, "expected page 0");
+        client.assert(response.body.size === 20, "expected default size 20");
+    });
+%}
+
+### Fetch devices by brand, matching is case-insensitive
+GET {{api}}?brand=gOoGlE
+
+> {%
+    client.test("brand filter ignores case", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.content.length >= 1, "expected a match");
+        response.body.content.forEach(function (d) {
+            client.assert(d.brand.toLowerCase() === "google", "wrong brand in results");
+        });
+    });
+%}
+
+### Fetch devices by state
+GET {{api}}?state=IN_USE
+
+> {%
+    client.test("state filter", function () {
+        client.assert(response.status === 200, "expected 200");
+        response.body.content.forEach(function (d) {
+            client.assert(d.state === "IN_USE", "wrong state in results");
+        });
+    });
+%}
+
+### Fetch by brand and state together
+GET {{api}}?brand=Apple&state=IN_USE
+
+### A blank brand means unfiltered
+GET {{api}}?brand=
+
+### Pagination and sorting
+GET {{api}}?page=0&size=2&sort=name,asc
+
+> {%
+    client.test("honours page size", function () {
+        client.assert(response.body.content.length <= 2, "page size not applied");
+        client.assert(response.body.size === 2, "expected size 2");
+    });
+%}
+
+### Page size is capped at 100
+GET {{api}}?size=5000
+
+> {%
+    client.test("caps the page size", function () {
+        client.assert(response.body.size === 100, "expected the cap of 100");
+    });
+%}
+
+###############################################################################
+# Update
+###############################################################################
+
+### Full update of an available device
+PUT {{api}}/{{availableId}}
+Content-Type: application/json
+
+{
+  "name": "Pixel 10",
+  "brand": "Google",
+  "state": "AVAILABLE"
+}
+
+> {%
+    client.test("replaced", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.name === "Pixel 10", "name was not applied");
+    });
+%}
+
+### Partial update, omitted properties keep their value
+PATCH {{api}}/{{availableId}}
+Content-Type: application/json
+
+{
+  "state": "INACTIVE"
+}
+
+> {%
+    client.test("patched only the state", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.state === "INACTIVE", "state was not applied");
+        client.assert(response.body.brand === "Google", "brand should be untouched");
+    });
+%}
+
+### A creation time sent by a client is ignored
+PATCH {{api}}/{{availableId}}
+Content-Type: application/json
+
+{
+  "creationTime": "1999-01-01T00:00:00Z"
+}
+
+> {%
+    client.test("creationTime is not accepted", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(!response.body.creationTime.startsWith("1999"), "creationTime was overwritten");
+    });
+%}
+
+### A full update may release a device that is in use, if name and brand are unchanged
+PUT {{api}}/{{inUseId}}
+Content-Type: application/json
+
+{
+  "name": "iPhone 17",
+  "brand": "Apple",
+  "state": "AVAILABLE"
+}
+
+> {%
+    client.test("released", function () {
+        client.assert(response.status === 200, "expected 200");
+        client.assert(response.body.state === "AVAILABLE", "expected AVAILABLE");
+    });
+%}
+
+###############################################################################
+# Domain rules, each expected to fail
+###############################################################################
+
+### Set up a device that is in use, for the two rules below
+POST {{api}}
+Content-Type: application/json
+
+{
+  "name": "Locked Device",
+  "brand": "Acme",
+  "state": "IN_USE"
+}
+
+> {% client.global.set("lockedId", response.body.id); %}
+
+### Rule: the name cannot change while the device is in use -> 409
+PATCH {{api}}/{{lockedId}}
+Content-Type: application/json
+
+{
+  "name": "Renamed While In Use"
+}
+
+> {%
+    client.test("rejects the rename", function () {
+        client.assert(response.status === 409, "expected 409");
+        client.assert(response.body.title === "Device is in use", "unexpected title");
+        client.assert(response.body.type.endsWith("device-in-use"), "unexpected problem type");
+    });
+%}
+
+### Rule: the brand cannot change while the device is in use -> 409
+PUT {{api}}/{{lockedId}}
+Content-Type: application/json
+
+{
+  "name": "Locked Device",
+  "brand": "Different Brand",
+  "state": "IN_USE"
+}
+
+> {%
+    client.test("rejects the brand change", function () {
+        client.assert(response.status === 409, "expected 409");
+    });
+%}
+
+### Rule: a device in use cannot be deleted -> 409
+DELETE {{api}}/{{lockedId}}
+
+> {%
+    client.test("rejects the delete", function () {
+        client.assert(response.status === 409, "expected 409");
+        client.assert(response.body.title === "Device is in use", "unexpected title");
+    });
+%}
+
+###############################################################################
+# Validation and error contract
+###############################################################################
+
+### Blank name -> 400 with a per-field breakdown
+POST {{api}}
+Content-Type: application/json
+
+{
+  "name": "   ",
+  "brand": "Acme"
+}
+
+> {%
+    client.test("rejects a blank name", function () {
+        client.assert(response.status === 400, "expected 400");
+        client.assert(response.body.errors.length >= 1, "expected field errors");
+    });
+%}
+
+### PUT requires every property -> 400
+PUT {{api}}/{{availableId}}
+Content-Type: application/json
+
+{
+  "name": "Only A Name"
+}
+
+> {%
+    client.test("rejects an incomplete replacement", function () {
+        client.assert(response.status === 400, "expected 400");
+    });
+%}
+
+### Unknown state value -> 400
+GET {{api}}?state=BOGUS
+
+> {%
+    client.test("rejects an unknown state", function () {
+        client.assert(response.status === 400, "expected 400");
+    });
+%}
+
+### Unknown sort property -> 400
+GET {{api}}?sort=nope
+
+> {%
+    client.test("rejects an unknown sort property", function () {
+        client.assert(response.status === 400, "expected 400");
+    });
+%}
+
+### Malformed UUID -> 400
+GET {{api}}/not-a-uuid
+
+> {%
+    client.test("rejects a malformed id", function () {
+        client.assert(response.status === 400, "expected 400");
+    });
+%}
+
+### Unknown device -> 404
+GET {{api}}/00000000-0000-0000-0000-000000000000
+
+> {%
+    client.test("reports a missing device", function () {
+        client.assert(response.status === 404, "expected 404");
+        client.assert(response.body.title === "Device not found", "unexpected title");
+    });
+%}
+
+###############################################################################
+# Delete
+###############################################################################
+
+### Release the locked device so it can be cleaned up
+PUT {{api}}/{{lockedId}}
+Content-Type: application/json
+
+{
+  "name": "Locked Device",
+  "brand": "Acme",
+  "state": "AVAILABLE"
+}
+
+### Delete it -> 204
+DELETE {{api}}/{{lockedId}}
+
+> {%
+    client.test("deleted", function () {
+        client.assert(response.status === 204, "expected 204");
+    });
+%}
+
+### It is gone -> 404
+GET {{api}}/{{lockedId}}
+
+> {%
+    client.test("no longer retrievable", function () {
+        client.assert(response.status === 404, "expected 404");
+    });
+%}
