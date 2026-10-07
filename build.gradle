@@ -6,7 +6,7 @@ plugins {
 
 group = 'org.device'
 version = '0.0.1-SNAPSHOT'
-description = 'device-inventory-service'
+description = 'device-registry-api'
 
 java {
     toolchain {
@@ -20,10 +20,12 @@ repositories {
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-database-postgresql'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.1'
     runtimeOnly 'org.postgresql:postgresql'
 
     // Starts compose.yaml automatically on bootRun and wires the datasource.
@@ -45,4 +47,10 @@ tasks.named('jar') {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // Colima only: Testcontainers needs the VM-side socket path for Ryuk.
+    def colimaSocket = file("${System.getProperty('user.home')}/.colima/default/docker.sock")
+    if (colimaSocket.exists()) {
+        environment 'DOCKER_HOST', "unix://${colimaSocket}"
+        environment 'TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE', '/var/run/docker.sock'
+    }
 }

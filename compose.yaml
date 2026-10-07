@@ -6,7 +6,10 @@ services:
       - 'POSTGRES_USER=devices'
       - 'POSTGRES_PASSWORD=secret'
     ports:
-      - "5432:5432"
+      # Published on a random host port: spring-boot-docker-compose reads the mapping, so
+      # nothing needs to know the number, and a Postgres already running on 5432 is no
+      # longer a conflict. `docker compose port postgres 5432` prints the one in use.
+      - '5432'
     volumes:
       - 'postgres-data:/var/lib/postgresql'
     healthcheck:

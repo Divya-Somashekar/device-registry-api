@@ -1,13 +1,13 @@
 package org.device.deviceregistryapi.device;
 
-import java.time.Instant;
 import java.util.UUID;
 
-import org.device.deviceregistryapi.common.DeviceInUseException;
-import org.device.deviceregistryapi.common.DeviceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.core.PropertyReferenceException;
+import org.springframework.data.core.TypeInformation;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -170,6 +170,52 @@ class DeviceControllerTest {
     }
 
     @Test
+    void patchRejectsABlankName() throws Exception {
+        mockMvc.perform(patch("/api/v1/devices/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"   "}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.errors[0].field").value("name"))
+                .andExpect(jsonPath("$.errors[0].message").value("must not be blank"));
+    }
+
+    @Test
+    void patchRejectsABlankBrand() throws Exception {
+        mockMvc.perform(patch("/api/v1/devices/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"brand":""}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("brand"));
+    }
+
+    @Test
+    void patchStillAcceptsAnAbsentName() throws Exception {
+        when(service.patch(eq(ID), any()))
+                .thenReturn(device("Pixel 9", "Google", DeviceState.INACTIVE));
+
+        mockMvc.perform(patch("/api/v1/devices/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"state":"INACTIVE"}"""))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void listRejectsAnUnknownSortProperty() throws Exception {
+        when(service.find(any(), any(), any()))
+                .thenThrow(new PropertyReferenceException(
+                        "notAProperty", TypeInformation.of(Device.class), java.util.List.of()));
+
+        mockMvc.perform(get("/api/v1/devices").param("sort", "notAProperty"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.title").value("Invalid sort property"));
+    }
+
+    @Test
     void deleteReturns204() throws Exception {
         mockMvc.perform(delete("/api/v1/devices/{id}", ID))
                 .andExpect(status().isNoContent());
@@ -185,5 +231,29 @@ class DeviceControllerTest {
         mockMvc.perform(delete("/api/v1/devices/{id}", ID))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409));
+    }
+
+    @Test
+    void deleteReturns409WhenTheDeviceWasChangedConcurrently() throws Exception {
+        doThrow(new OptimisticLockingFailureException("stale")).when(service).delete(ID);
+
+        mockMvc.perform(delete("/api/v1/devices/{id}", ID))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.title").value("Concurrent modification"))
+                .andExpect(jsonPath("$.type")
+                        .value("https://api.device-registry/problems/concurrent-modification"));
+    }
+
+    @Test
+    void patchReturns409WhenTheDeviceWasChangedConcurrently() throws Exception {
+        when(service.patch(eq(ID), any()))
+                .thenThrow(new OptimisticLockingFailureException("stale"));
+
+        mockMvc.perform(patch("/api/v1/devices/{id}", ID)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"state\":\"INACTIVE\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Concurrent modification"));
     }
 }

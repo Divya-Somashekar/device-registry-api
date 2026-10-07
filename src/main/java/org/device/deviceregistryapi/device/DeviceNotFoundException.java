@@ -1,4 +1,4 @@
-package org.device.deviceregistryapi.common;
+package org.device.deviceregistryapi.device;
 
 import java.util.UUID;
 

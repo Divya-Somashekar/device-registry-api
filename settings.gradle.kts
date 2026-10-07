@@ -1,1 +1,0 @@
-rootProject.name = "device-registry-api"

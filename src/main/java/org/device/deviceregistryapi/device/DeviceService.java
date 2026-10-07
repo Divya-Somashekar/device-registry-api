@@ -2,13 +2,13 @@ package org.device.deviceregistryapi.device;
 
 import java.util.UUID;
 
-import org.device.deviceregistryapi.common.DeviceInUseException;
-import org.device.deviceregistryapi.common.DeviceNotFoundException;
 import org.device.deviceregistryapi.device.dto.CreateDeviceRequest;
 import org.device.deviceregistryapi.device.dto.PatchDeviceRequest;
 import org.device.deviceregistryapi.device.dto.ReplaceDeviceRequest;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,18 +32,38 @@ public class DeviceService {
         return repository.findById(id).orElseThrow(() -> new DeviceNotFoundException(id));
     }
 
+    /**
+     * A blank brand is treated as no brand at all. {@code ?brand=} is how a form or a client
+     * that clears a filter spells "unset", and matching devices whose brand is the empty
+     * string would answer a question nobody asked: the column never holds one.
+     */
     @Transactional(readOnly = true)
-    public Page<Device> find(String brand, DeviceState state, Pageable pageable) {
-        if (brand != null && state != null) {
-            return repository.findByBrandIgnoreCaseAndState(brand, state, pageable);
+    public Page<Device> find(String brand, DeviceState state, Pageable request) {
+        Pageable pageable = withStableOrder(request);
+        String brandFilter = (brand == null || brand.isBlank()) ? null : brand.strip();
+        if (brandFilter != null && state != null) {
+            return repository.findByBrandIgnoreCaseAndState(brandFilter, state, pageable);
         }
-        if (brand != null) {
-            return repository.findByBrandIgnoreCase(brand, pageable);
+        if (brandFilter != null) {
+            return repository.findByBrandIgnoreCase(brandFilter, pageable);
         }
         if (state != null) {
             return repository.findByState(state, pageable);
         }
         return repository.findAll(pageable);
+    }
+
+    /**
+     * Appends the primary key to the requested sort. Without a total order, rows that tie on
+     * the sort key have no defined position, so a concurrent write can move one across a page
+     * boundary and leave it duplicated on one page and missing from the next.
+     */
+    private static Pageable withStableOrder(Pageable pageable) {
+        if (pageable.getSort().getOrderFor("id") != null) {
+            return pageable;
+        }
+        Sort stable = pageable.getSort().and(Sort.by(Sort.Direction.DESC, "id"));
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), stable);
     }
 
     /**

@@ -2,7 +2,6 @@ package org.device.deviceregistryapi.device;
 
 import java.time.Instant;
 
-import org.device.deviceregistryapi.common.DeviceInUseException;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +63,32 @@ class DeviceTest {
         Device device = new Device("Pixel 9", "Google", DeviceState.IN_USE);
 
         assertThatCode(() -> device.rename("Pixel 9", "Google")).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsABlankNameOnRename() {
+        Device device = new Device("Pixel 9", "Google", DeviceState.AVAILABLE);
+
+        assertThatThrownBy(() -> device.rename("   ", "Google"))
+                .isInstanceOf(InvalidDeviceException.class);
+
+        assertThat(device.getName()).isEqualTo("Pixel 9");
+    }
+
+    @Test
+    void rejectsABlankBrandOnRename() {
+        Device device = new Device("Pixel 9", "Google", DeviceState.AVAILABLE);
+
+        assertThatThrownBy(() -> device.rename("Pixel 9", ""))
+                .isInstanceOf(InvalidDeviceException.class);
+
+        assertThat(device.getBrand()).isEqualTo("Google");
+    }
+
+    @Test
+    void rejectsABlankNameOnConstruction() {
+        assertThatThrownBy(() -> new Device(" ", "Google", DeviceState.AVAILABLE))
+                .isInstanceOf(InvalidDeviceException.class);
     }
 
     @Test

@@ -1,3 +1,41 @@
 spring:
   application:
     name: device-registry-api
+
+  jpa:
+    # Flyway owns the schema; Hibernate only verifies the entities match it.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    locations: classpath:db/migration
+
+  data:
+    web:
+      pageable:
+        # Spring's own ceiling is 2000; a single request returning that many devices is not a
+        # reasonable default for this collection.
+        max-page-size: 100
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only what the container orchestrator needs; nothing else is exposed.
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+# The datasource is supplied automatically:
+#   bootRun -> spring-boot-docker-compose reads compose.yaml
+#   tests   -> Testcontainers via @ServiceConnection
+# To point at an external Postgres instead, set:
+#   SPRING_DATASOURCE_URL / SPRING_DATASOURCE_USERNAME / SPRING_DATASOURCE_PASSWORD

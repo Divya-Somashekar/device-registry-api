@@ -4,6 +4,11 @@ import java.net.URI;
 import java.util.Comparator;
 import java.util.List;
 
+import org.device.deviceregistryapi.device.DeviceInUseException;
+import org.device.deviceregistryapi.device.DeviceNotFoundException;
+import org.device.deviceregistryapi.device.InvalidDeviceException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.core.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -31,6 +36,38 @@ class GlobalExceptionHandler {
                 "device-in-use");
     }
 
+    /**
+     * A write built on a stale read: another transaction changed the device between the point
+     * this one loaded it and the point it tried to write. The request is not wrong, so it is
+     * reported as a conflict the client can resolve by re-reading and retrying, rather than as
+     * a server fault.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ProblemDetail handleConcurrentModification() {
+        return problem(HttpStatus.CONFLICT, "Concurrent modification",
+                "The device was changed by another request. Fetch it again and retry.",
+                "concurrent-modification");
+    }
+
+    @ExceptionHandler(InvalidDeviceException.class)
+    ProblemDetail handleInvalidDevice(InvalidDeviceException exception) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid device", exception.getMessage(),
+                "invalid-device");
+    }
+
+    /**
+     * An unknown property in the {@code sort} parameter. Sorting is part of the public
+     * contract of the collection endpoint, so naming a property that does not exist is a
+     * client error rather than a server fault.
+     */
+    @ExceptionHandler(PropertyReferenceException.class)
+    ProblemDetail handleUnknownSortProperty(PropertyReferenceException exception) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid sort property",
+                "'%s' is not a sortable property of a device"
+                        .formatted(exception.getPropertyName()),
+                "invalid-sort-property");
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ProblemDetail handleValidation(MethodArgumentNotValidException exception) {
         List<FieldError> errors = exception.getBindingResult().getFieldErrors().stream()
@@ -49,7 +86,7 @@ class GlobalExceptionHandler {
      * before validation runs.
      */
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    ProblemDetail handleUnreadable(HttpMessageNotReadableException exception) {
+    ProblemDetail handleUnreadable() {
         return problem(HttpStatus.BAD_REQUEST, "Malformed request",
                 "The request body could not be read. Check the JSON syntax and that every "
                         + "value is of the expected type.", "malformed-request");
@@ -65,10 +102,10 @@ class GlobalExceptionHandler {
     }
 
     private static ProblemDetail problem(HttpStatus status, String title, String detail,
-                                         String type) {
+            String type) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setTitle(title);
-        problem.setType(URI.create("https://api.device-inventory/problems/" + type));
+        problem.setType(URI.create("https://api.device-registry/problems/" + type));
         return problem;
     }
 

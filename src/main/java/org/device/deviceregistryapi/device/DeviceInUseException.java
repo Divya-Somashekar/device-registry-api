@@ -1,4 +1,4 @@
-package org.device.deviceregistryapi.common;
+package org.device.deviceregistryapi.device;
 
 /**
  * Raised when an operation is not permitted because the device is in use.

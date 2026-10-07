@@ -84,6 +84,16 @@ class DeviceApiIntegrationTest {
     }
 
     @Test
+    void ignoresABlankBrandFilter() throws Exception {
+        createDevice("Pixel 9", "Google", DeviceState.AVAILABLE);
+        createDevice("Galaxy S25", "Samsung", DeviceState.AVAILABLE);
+
+        mockMvc.perform(get("/api/v1/devices").param("brand", ""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+    }
+
+    @Test
     void fetchesDevicesByState() throws Exception {
         createDevice("Pixel 9", "Google", DeviceState.AVAILABLE);
         createDevice("Galaxy S25", "Samsung", DeviceState.IN_USE);
@@ -207,6 +217,41 @@ class DeviceApiIntegrationTest {
                 .andExpect(jsonPath("$.title").value("Device is in use"));
 
         mockMvc.perform(get("/api/v1/devices/{id}", id)).andExpect(status().isOk());
+    }
+
+    @Test
+    void capsThePageSize() throws Exception {
+        mockMvc.perform(get("/api/v1/devices").param("size", "100000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(100));
+    }
+
+    @Test
+    void rejectsAnUnknownSortProperty() throws Exception {
+        mockMvc.perform(get("/api/v1/devices").param("sort", "notAProperty"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid sort property"));
+    }
+
+    @Test
+    void rejectsABlankNameOnPatch() throws Exception {
+        String id = createDevice("Pixel 9", "Google", DeviceState.AVAILABLE);
+
+        mockMvc.perform(patch("/api/v1/devices/{id}", id)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"   "}"""))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/v1/devices/{id}", id))
+                .andExpect(jsonPath("$.name").value("Pixel 9"));
+    }
+
+    @Test
+    void exposesAHealthEndpoint() throws Exception {
+        mockMvc.perform(get("/actuator/health/readiness"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
     }
 
     @Test

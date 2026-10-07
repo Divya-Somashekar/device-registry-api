@@ -11,8 +11,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-
-import org.device.deviceregistryapi.common.DeviceInUseException;
+import jakarta.persistence.Version;
 
 /**
  * A device in the inventory.
@@ -21,8 +20,13 @@ import org.device.deviceregistryapi.common.DeviceInUseException;
  * reach an invalid state through any caller:
  * <ul>
  *     <li>the creation time is assigned once and never changes;</li>
- *     <li>the name and brand cannot change while the device is in use.</li>
+ *     <li>the name and brand cannot change while the device is in use;</li>
+ *     <li>the name and brand always carry a visible character.</li>
  * </ul>
+ *
+ * <p>The rules above are checks against the state the device was loaded with, so on their own
+ * they are only as current as that read. {@code version} closes the gap: a write built on a
+ * stale read is rejected at flush rather than silently overwriting a newer one.
  */
 @Entity
 @Table(name = "device")
@@ -45,13 +49,21 @@ public class Device {
     @Column(name = "creation_time", nullable = false, updatable = false)
     private Instant creationTime;
 
+    /**
+     * Incremented by Hibernate on every update, and matched in the {@code WHERE} clause of
+     * every update and delete. Not part of the HTTP contract: it guards operations within the
+     * service, which read and write a device in one transaction.
+     */
+    @Version
+    private long version;
+
     protected Device() {
         // required by JPA
     }
 
     public Device(String name, String brand, DeviceState state) {
-        this.name = name;
-        this.brand = brand;
+        this.name = requireText(name, "name");
+        this.brand = requireText(brand, "brand");
         this.state = state;
         this.creationTime = Instant.now();
     }
@@ -63,9 +75,13 @@ public class Device {
      * nothing is being updated. That exemption is what lets a full replacement (PUT) resend
      * the unchanged name and brand alongside a new state.
      *
-     * @throws DeviceInUseException if either value would change while the device is in use
+     * @throws DeviceInUseException  if either value would change while the device is in use
+     * @throws InvalidDeviceException if either value is blank
      */
     public void rename(String newName, String newBrand) {
+        requireText(newName, "name");
+        requireText(newBrand, "brand");
+
         boolean unchanged = this.name.equals(newName) && this.brand.equals(newBrand);
         if (!unchanged && isInUse()) {
             throw new DeviceInUseException(
@@ -77,6 +93,17 @@ public class Device {
 
     public void changeState(DeviceState newState) {
         this.state = newState;
+    }
+
+    /**
+     * Guards the invariant at the point of mutation, so it holds for every caller rather than
+     * only for the request models that happen to declare a constraint.
+     */
+    private static String requireText(String value, String property) {
+        if (value == null || value.isBlank()) {
+            throw new InvalidDeviceException("The device " + property + " must not be blank");
+        }
+        return value;
     }
 
     public boolean isInUse() {
@@ -101,5 +128,9 @@ public class Device {
 
     public Instant getCreationTime() {
         return creationTime;
+    }
+
+    public long getVersion() {
+        return version;
     }
 }
