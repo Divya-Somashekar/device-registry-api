@@ -49,7 +49,7 @@ With the application running:
 
 The specification is generated from the controller, so it cannot drift from the implementation.
 
-![Swagger UI listing the seven device operations, served from the generated OpenAPI 3.1 document](docs/images/swagger.png)
+![Swagger UI listing the six device operations, served from the generated OpenAPI 3.1 document](docs/images/swagger.png)
 
 The health endpoint reports the two probes the container healthcheck depends on:
 
@@ -65,6 +65,9 @@ The health endpoint reports the two probes the container healthcheck depends on:
 | `PUT` | `/api/v1/devices/{id}` | Fully update a device | `200` | `400`, `404`, `409` |
 | `PATCH` | `/api/v1/devices/{id}` | Partially update a device | `200` | `400`, `404`, `409` |
 | `DELETE` | `/api/v1/devices/{id}` | Delete a device | `204` | `400`, `404`, `409` |
+
+Six operations cover the seven required functionalities: fetching by brand and fetching by
+state are filters on the collection rather than endpoints of their own.
 
 Collection query parameters: `brand` (case-insensitive, trimmed; blank means unfiltered),
 `state`, `page`, `size`, `sort`.
@@ -184,7 +187,7 @@ Validation failures add a per-field breakdown:
 ./gradlew test
 ```
 
-79 tests, grouped by what they isolate:
+85 tests, grouped by what they isolate:
 
 | Level | What it covers |
 |---|---|
@@ -215,6 +218,13 @@ caller that only wants to change the state must resend the existing name and bra
 while the device is in use is rejected, even if the same request would also move the device out
 of use. The rule is evaluated against the stored state, not the requested one, which keeps
 `PUT` and `PATCH` consistent.
+
+**The name and brand are trimmed on write.** The brand filter strips its argument, so a
+brand persisted with surrounding whitespace would be unreachable through it from either side:
+a trimmed query would not match the padded column, and a padded query is itself stripped
+before use. Normalising in `Device` rather than in the request records keeps the stored form
+and the filtered form in agreement for every caller, and makes the length limit count visible
+characters.
 
 **`null` and absent are the same thing in a `PATCH`.** No property of a device is nullable, so
 there is nothing a client could mean by explicitly setting one to `null`. This avoids needing a
