@@ -83,6 +83,21 @@ class DeviceApiIntegrationTest {
                 .andExpect(jsonPath("$.content[0].name").value("Galaxy S25"));
     }
 
+    /**
+     * The brand filter strips its argument, so a brand persisted with surrounding whitespace
+     * used to be unreachable from either side: the trimmed query missed the padded column, and
+     * a padded query was stripped before it was used. The brand is now normalised on write.
+     */
+    @Test
+    void fetchesADeviceWhoseBrandWasCreatedWithSurroundingWhitespace() throws Exception {
+        createDevice("Pixel 9", "  Google  ", DeviceState.AVAILABLE);
+
+        mockMvc.perform(get("/api/v1/devices").param("brand", "Google"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].brand").value("Google"));
+    }
+
     @Test
     void ignoresABlankBrandFilter() throws Exception {
         createDevice("Pixel 9", "Google", DeviceState.AVAILABLE);

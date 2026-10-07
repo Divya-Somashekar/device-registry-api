@@ -21,7 +21,7 @@ import jakarta.persistence.Version;
  * <ul>
  *     <li>the creation time is assigned once and never changes;</li>
  *     <li>the name and brand cannot change while the device is in use;</li>
- *     <li>the name and brand always carry a visible character.</li>
+ *     <li>the name and brand always carry a visible character, and are stored trimmed.</li>
  * </ul>
  *
  * <p>The rules above are checks against the state the device was loaded with, so on their own
@@ -71,6 +71,9 @@ public class Device {
     /**
      * Changes the name and brand.
      *
+     * <p>Both values are trimmed first, so the comparison below sees the same form that is
+     * stored: resending a padded copy of the current name is not a change.
+     *
      * <p>Rejected when the device is in use, unless both values already match, in which case
      * nothing is being updated. That exemption is what lets a full replacement (PUT) resend
      * the unchanged name and brand alongside a new state.
@@ -79,16 +82,16 @@ public class Device {
      * @throws InvalidDeviceException if either value is blank
      */
     public void rename(String newName, String newBrand) {
-        requireText(newName, "name");
-        requireText(newBrand, "brand");
+        String name = requireText(newName, "name");
+        String brand = requireText(newBrand, "brand");
 
-        boolean unchanged = this.name.equals(newName) && this.brand.equals(newBrand);
+        boolean unchanged = this.name.equals(name) && this.brand.equals(brand);
         if (!unchanged && isInUse()) {
             throw new DeviceInUseException(
                     "Cannot change the name or brand of device " + id + " while it is in use");
         }
-        this.name = newName;
-        this.brand = newBrand;
+        this.name = name;
+        this.brand = brand;
     }
 
     public void changeState(DeviceState newState) {
@@ -98,12 +101,18 @@ public class Device {
     /**
      * Guards the invariant at the point of mutation, so it holds for every caller rather than
      * only for the request models that happen to declare a constraint.
+     *
+     * <p>Returns the value trimmed, because {@link DeviceService} strips the brand it filters
+     * on. A brand stored with surrounding whitespace would otherwise be unreachable through
+     * that filter from either side: the trimmed query would not match the padded column, and a
+     * padded query is itself stripped before it is used. Normalising on write keeps the two in
+     * agreement, and makes the length constraint count visible characters.
      */
     private static String requireText(String value, String property) {
         if (value == null || value.isBlank()) {
             throw new InvalidDeviceException("The device " + property + " must not be blank");
         }
-        return value;
+        return value.strip();
     }
 
     public boolean isInUse() {

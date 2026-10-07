@@ -86,6 +86,38 @@ class DeviceTest {
     }
 
     @Test
+    void trimsTheNameAndBrandOnConstruction() {
+        Device device = new Device("  Pixel 9  ", "\tGoogle\n", DeviceState.AVAILABLE);
+
+        assertThat(device.getName()).isEqualTo("Pixel 9");
+        assertThat(device.getBrand()).isEqualTo("Google");
+    }
+
+    @Test
+    void trimsTheNameAndBrandOnRename() {
+        Device device = new Device("Pixel 9", "Google", DeviceState.AVAILABLE);
+
+        device.rename("  Pixel 10  ", "  Alphabet  ");
+
+        assertThat(device.getName()).isEqualTo("Pixel 10");
+        assertThat(device.getBrand()).isEqualTo("Alphabet");
+    }
+
+    /**
+     * The in-use rule compares trimmed values, so a client that resends the current name and
+     * brand with stray whitespace is not asking for a change and is not refused.
+     */
+    @Test
+    void allowsAPaddedResendOfTheCurrentNameAndBrandWhileInUse() {
+        Device device = new Device("Pixel 9", "Google", DeviceState.IN_USE);
+
+        assertThatCode(() -> device.rename("  Pixel 9  ", "  Google  "))
+                .doesNotThrowAnyException();
+
+        assertThat(device.getName()).isEqualTo("Pixel 9");
+    }
+
+    @Test
     void rejectsABlankNameOnConstruction() {
         assertThatThrownBy(() -> new Device(" ", "Google", DeviceState.AVAILABLE))
                 .isInstanceOf(InvalidDeviceException.class);
